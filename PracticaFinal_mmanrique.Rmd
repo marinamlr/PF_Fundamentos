@@ -1,0 +1,477 @@
+---
+title: "Análisis de los Resultados Electorales de EEUU"
+author:
+  name: Marina Manrique López-Rey
+  affiliation: Fundamentos Matemáticos. 2ºMIT+MBD
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 4
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Práctica Final
+
+En este análisis se estudiarán los resultados electorales de Estados Unidos. Para ello, en primer lugar se realizará un análisis de los resultados obtenidos en las elecciones de 2012 y 2016 y los porcentajes demográficos de los votantes de esos años. Estos datos serán obtenidos mediante un csv de la página MIT Election Lab, fuente pública de datos electorales del MIT.
+
+Por otro lado, se realizará un análisis de los resultados obtenidos en las eleccionesde Noviembre 2020. Puesto que todavía no tenemos una fuente que ponga este dataset a nuestra disposición, obtendremos los datos mediante técnicas de webscrapping. Por último, se estudiará la relación de estos resultados con el número de casos de COVID-19 de cada estado de EEUU.
+
+### Librerías
+En primer lugar, cargamos las librerías que vamos a necesitar para nuestro análisis.
+
+```{r,message=FALSE, warning=FALSE}
+library('rvest')
+library(stringr)
+library(ggplot2)
+library(tidyverse)
+library(gapminder)
+library(dplyr)
+library(reshape2)
+library(maps)
+library(RSelenium)
+library(DT)
+```
+
+
+### Adquisición y Transformación de Datos {.tabset}
+
+Tal y como hemos mencionado anteriormente, tomamos los datos de las diferentes fuentes.
+
+#### Datos Históricos
+Puesto que se tratan de datos históricos, cargamos el csv directamente, que hemos descargado anteriormente de la página de GitHub mencionada.
+```{r pressure, echo=FALSE}
+# Cargar archivo
+fdata<-read.table(file="election-context-2018.csv",
+                  sep=",",
+                  header=TRUE,
+                  na.strings = "NA",
+                  stringsAsFactors = FALSE)
+```
+
+Mostramos los datos que se encuentran en la tabla.
+
+```{r}
+datatable(fdata,options = list(
+  pageLength=10, scrollX='400px'))
+```
+
+Realizamos una limpieza preliminar de estos datos. En primer lugar, analizamos que columnas tienen NA y podrían afectar negativamente a nuestro análisis. Consideramos que una columna debe ser eliminada si más del 50% de sus observaciones son NAs. En este caso eliminaremos las columnas de gobernadores 2016 y 2014. Los NA de senado 2016 serán sustituidos por ceros.
+
+```{r message=FALSE, warning=FALSE}
+fdata %>%
+  select(everything())%>%
+  group_by(state)%>%
+  summarise_all(funs(sum(is.na(.))))%>%
+  datatable(options = list(
+  pageLength=10, scrollX='400px'))
+```
+
+Trabajaremos con la tabla Elect_data. En esta tabla, modificamos las columnas de información demográfica para que sus valores sean en número de habitantes y no en porcentaje, para que todos los datos se encuentren en las mismas unidades.
+
+```{r}
+drop<-c("demgov16","repgov16","othergov16","demgov14","repgov14","othergov14")
+Elect_data<-fdata[,!names(fdata)%in%drop]
+Elect_data<-cbind(Elect_data[,c(1:17,26)],Elect_data[,c(18:25,27:32)]*Elect_data$cvap/100)
+names(Elect_data)<-str_replace(names(Elect_data), "_pct", "")
+Elect_data[is.na(Elect_data)] <- 0
+```
+
+Mostramos la primera tabla.
+
+```{r}
+datatable(Elect_data,options = list(
+  pageLength=10, scrollX='400px'))
+```
+
+Obtenemos información del tipo de variables con las que vamos a trabajar. Todas nuestras variables son numéricas excepto las que indican el estado y condado. Esto facilitará nuestro análisis, así como la representación de los resultados cuantitativos en gráficos.
+
+```{r}
+str(Elect_data)
+```
+
+
+#### Datos Elecciones 2020
+
+Puesto que los datos sobre las elecciones de Noviembre 2020 son muy recientes, no podemos obtenerlos de otras fuentes que no sean páginas web online, en este caso la web de una cadena de noticias americana. Inicialmente intentamos realizar la obtención de datos mediante rvest. Puesto que los datos se cargan en esta página de forma dinámica, se tuvo que emplear la librería RSelenium. Para ello empleamos un servidor Selenium que correrá sobre un contenedor de Docker.
+
+```{r}
+# remDr <- remoteDriver(
+#   remoteServerAddr = "localhost",
+#   port = 4445L,
+#   browserName = "firefox"
+# )
+# remDr$open()
+# url_us<-'https://www.nbcnews.com/politics/2020-elections/president-results'
+# remDr$navigate(url_us)
+# webpage<-remDr$getPageSource()[[1]]
+# tabla_us<-webpage%>%read_html()%>%html_table(fill = TRUE)
+# df_us<-as.data.frame(tabla_us[[1]])%>%
+#   na.omit()%>%
+#   select(c(,1:5))
+# write.csv(df_us,"elecciones2020.csv")
+```
+
+Abrimos los datos que hemos extraído en el csv y realizamos los cambios pertinentes a las columnas para filtrar el texto necesario.
+
+```{r}
+data_2020<-read.table(file="elecciones2020.csv",
+                  sep=",",
+                  header=TRUE,
+                  na.strings = "NA",
+                  stringsAsFactors = FALSE,
+                  row.names = 1)
+
+data_2020<-data_2020%>% 
+          select(State.Name,Total.Electoral.Votes,Democratic.Candidate,Republican.Candidate)
+
+datatable(data_2020,options = list(
+  pageLength=10, scrollX='400px'))
+```
+
+
+#### Datos COVID-19 
+Al igual que en el caso de las elecciones de 2020, obtendremos los datos de los casos de COVID-19 directamente de la página oficial del gobierno de EEUU. 
+
+```{r}
+# url<- 'https://covid.cdc.gov/covid-data-tracker/#cases_totalcases'
+# remDr$navigate(url)
+# webpage<-remDr$getPageSource()[[1]]
+# tabla<-webpage%>%read_html()%>%html_table()
+# df<-as.data.frame(tabla[[1]])%>%
+#   mutate_all(funs(str_replace(., ",", "")))
+# day<-Sys.Date()%>%format('%m-%Y')
+# write.csv(df,paste(day,"COVID.csv", sep ="_"))
+```
+
+El código anterior es el utilzado para esta extracción de datos. Los datos que vamos a emplear fueron almacendado en el fichero "11-2020_COVID.csv". Observamos los datos de la tabla, clasificados por estado.
+
+```{r}
+covid_data<-read.table(file="11-2020_COVID.csv",
+                  sep=",",
+                  header=TRUE,
+                  na.strings = "NA",
+                  stringsAsFactors = FALSE,
+                  row.names = 1)
+
+datatable(covid_data,options = list(
+  pageLength=10, scrollX='400px'))
+```
+
+### Análisis de Datos {.tabset}
+Analizaremos, en primer lugar, los datos de las elecciones 2012/2016 en relación con el resto de parámetros. Posteriormente, una vez estudiados los históricos, continuaremos estudiando la correlación entre los resultados de 2020 y los casos de COVID-19.
+
+
+#### Estadísticas Básicas
+En primer lugar, analizaremos la normalidad de las variables más importantes del dataset. Mediante la función summary obtenemos información de los estadísticos principales.
+
+En este resumen podemos observar datos interesantes que posteriormente analizaremos más en profundidad. Por ejemplo, observamos que tanto la media de votos de Obama como de Clinton fue superior a la de sus rivales, aunque esto no significó la victoria para ambos. También podemos ver que la media de habitantes por condado es de 100.000, aunque la distribución de la población es muy desigual ya que el máximo podemos ver que se sitúa en 10.000.000.
+
+```{r}
+data.frame(do.call(cbind, lapply(Elect_data, summary)))%>%
+  datatable(options = list(pageLength=10, scrollX='400px'))
+```
+
+Si observamos los datos trump16 y clinton16 intuimos que no seguirán una distribución normal debido a la gran diferencia entre la media y la mediana. Si obtenemos la desviación típica de estos valores, observamos valores muy elevados que indican que los valores pertenecen a un rango muy amplio, lo que se corresponde con la situación real ya que en EEUU observamos una gran diferencia entre las ciudades, con millones de habitanets, y el entorno rural.
+
+```{r}
+sd(Elect_data$trump16)
+sd(Elect_data$clinton16)
+```
+
+Para un mejor entendimiento de los datos, representamos los votos de Trump y de Clinton en histogramas. Representamos también su curva de densidad para estudiar la tendencia.
+
+```{r}
+cortes = seq(min(Elect_data$trump16), max(Elect_data$trump16), length.out = 15)
+ggplot(data = Elect_data) + 
+  geom_histogram(mapping = aes(trump16), breaks = cortes, 
+                 fill = "orange", color="black")
+ggplot(data=Elect_data)+
+  geom_density(mapping = aes(clinton16), color="orange", fill="lightblue", size=1)
+
+```
+```{r}
+cortes = seq(min(Elect_data$clinton16), max(Elect_data$clinton16), length.out = 15)
+ggplot(data = Elect_data) + 
+  geom_histogram(mapping = aes(clinton16), breaks = cortes, fill = "coral", color="black")
+ggplot(data=Elect_data)+
+  geom_density(mapping = aes(clinton16), color="coral", fill="lightblue", size=1)
+```
+
+Podemos observar que ambos datos están muy sesgados positivamente y que la concentración de los datos se encuentra prácticamente en el primer corte. Vemos que estas distribuciones no siguen una distribución normal. Tal y como hemos mencionado anteriormente, esto representa la gran cantidad de condados con pocos habitantes frente a una minoría de condados en la que habita la mayoría de la población.
+
+Tras obtener estos datos, representamos los votos en Boxplots para cuantificar los outliers. Entre las dos categorías obtenemos 840 outliers.Si añadimos a los candidatos de las elecciones de 2012, obtenemos el doble. No obstante, en este caso no son datos que se puedan eliminar o sustituir ya que estos outliers corresponden a una gran cantidad de los votos obtenidos por los candidatos.
+
+```{r}
+bxp<-boxplot(Elect_data$trump16,Elect_data$clinton16,Elect_data$romney12,Elect_data$obama12,
+             col = "aquamarine",names = c("Trump","Clinton","Romney","Obama"))
+length(bxp$out)
+```
+
+Mediante las tablas de frecuencias sobre la varible estados podemos obtener información del tamaño de cada uno de los estados, y por lo tanto, la influencia que pueden tener cada uno de ellos en los resultados electorales (teniendo en mente que a esto hay que sumarle la población de estos)
+
+Observamos una gran diferencia entre estados com Illinois con 102 condados (3.3%) y New Hampshire con 14 (0.32%). respectivamente. No obstante, no encontramos tanta diferencia entre Illinois y Masachussets con 14 condados (0.45%) 
+```{r}
+# Frecuencia Absoluta
+table(Elect_data$state)%>%
+  as.data.frame()%>%
+  datatable()
+  
+# Frecuencia Relativa
+signif(prop.table(table(Elect_data$state)), 2)%>%
+  as.data.frame()%>%
+  datatable()
+```
+
+Evaluamos la relación entre el número de votos electorales de cada estado y las dos variables que más deberían afectar a esta distribución de votos: el tamaño del estado y la población de este. No obstante, observamos que en ambos casos el valor de la correlación es menor que el esperado, siendo ambos valores de aproximadamente 43%.
+
+```{r message=FALSE}
+t1<-table(Elect_data$state)%>%
+  as.data.frame
+pop<-Elect_data%>%
+  group_by(state)%>%
+  summarise(poblacion=sum(total_population))%>%
+  select(state,poblacion)
+
+electoral<-merge(t1,data_2020,by.x="Var1",by.y="State.Name")%>%
+  merge(pop,by.x="Var1",by.y="state")
+cor(electoral$Freq,electoral$Total.Electoral.Votes,use="complete.obs") 
+cor(electoral$Freq,electoral$poblacion,use="complete.obs")
+```
+
+#### Relación entre variables
+Empleamos regresión lineal para observar si hay relación entre las variables principales del dataset. En primer lugar observamos que hay una correlación directa entre los votantes de Obama y de Clinton, así como entre los de Trump y Romney, aunque esta es menor que la de los candidatos demócratas puesto que vemos que los puntos no se adpatan con la misma precisión a la línea de regresión.
+
+```{r message=FALSE}
+ggplot(Elect_data, aes(x=obama12, y=clinton16), main=expression(obama12,clinton16)) + geom_point()+geom_smooth(method=lm,col = "coral1")
+
+ggplot(Elect_data, aes(x=obama12, y=trump16),main=expression(obama12,trump16)) + geom_point()+geom_smooth(method=lm,col = "coral1")
+```
+
+Podemos analizar también la relación de cada uno de los candidatos con el perfil de sus votantes. Por ejemplo, analizaremos la relación entre Clinton y Trump con los votantes mujeres. Podemos observar que la nube de puntos se aproxima más a la recta en el caso de Clinton, por lo que estas variables tienen una mayor correlación.
+
+```{r message=FALSE}
+ggplot(Elect_data, aes(x=female, y=clinton16)) + geom_point()+geom_smooth(method=lm,col = "coral1")
+ggplot(Elect_data, aes(x=female, y=trump16)) + geom_point()+geom_smooth(method=lm,col = "coral1")
+```
+
+Comprobamos numérciamente los resultados de los gráficos calculando los coeficientes para cada caso. Tal y como hemos visto en la representación del modelo, la correlación entre Clinton y Female es de 98%, mientras que entre Trump y Female es del 92%.
+
+```{r}
+cor(Elect_data$female,Elect_data$clinton16,use="complete.obs") 
+cor(Elect_data$female,Elect_data$trump16,use="complete.obs") 
+```
+
+
+#### Resultados por Estado
+Una vez realizado el análisis preliminar de los datos, pasamos a obtener de los datos agrupados por cada estado. Obtenemos los votos tanto de Trump como de Clinton y los representamos en un barplot para facilitar su análisis.
+
+```{r}
+trump<-Elect_data %>% 
+  group_by(state) %>%
+  summarise(votos = sum(trump16), n = n())%>%
+  select(state,votos) 
+
+clinton<-Elect_data %>% 
+  group_by(state) %>%
+  summarise(votos = sum(clinton16), n = n())%>%
+  select(state,votos) 
+
+State_df<-cbind(trump,clinton$votos)
+names(State_df)<-c("Estados","Trump","Clinton")
+```
+
+En esta representación podemos observar los estados en los que hubo una victoria clara de Clinton o Trump como en California o Texas (respectivamente) como aquellos "swing states" en los que los resultados estuvieron más reñidos, como en el Distrito de Columbia.
+
+```{r}
+State_aux<-melt(State_df,id.vars=c("Estados"))
+ggplot(data=State_aux, aes(x=Estados, y=value,fill=variable)) +
+  geom_bar(stat="identity")+
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Asímismo obtenemos los valores de demografía por estado en lugar de por condado, como vienen clasificados en el dataset.
+
+```{r}
+Dem<-Elect_data %>% 
+  group_by(state) %>%
+  summarise(sum(white),sum(black),sum(hispanic),sum(nonwhite),sum(foreignborn),sum(female),sum(age29andunder),sum(age65andolder))
+
+datatable(Dem,options = list(
+  pageLength=10, scrollX='400px'))
+```
+
+Obtenemos la tendencia de voto de cada uno de los estados en función de si votaron a Trump o Clinton y relacionamos este resultado con los diferentes datos de demografía. Esta información es muy importante para los candidatos, para así conocer el perfil de sus votantes y diseñar campañas electorales acordes a su público y objetivos.
+
+```{r}
+Win<-(State_df$Trump>State_df$Clinton) %>%
+  str_replace_all(c('TRUE'='Republican','FALSE'='Democrat'))
+State_df<-cbind(State_df,Win)
+```
+
+Podemos observar que de los 5 estados en los que la mayoría de la población no se identifica como "white", 4 de ellos son demócratas, mientras que solo 1 sería republicano.
+
+```{r}
+aux<-unlist(apply(Dem[,2:9],1,which.max))%>%
+  str_replace_all(c('1'='White','4'='NonWhite'))
+table(unlist(aux),State_df$Win)
+```
+
+Una vez analizados estos datos de las elecciones pasadas, pasaremos a analizar los datos de las elecciones 2020. Para facilitar el análisis de aquellos estados que han cambiado su tendencia de voto, representaremos por últmimo los votos en el mapa de EEUU.
+
+```{r}
+us_states<-map_data("state")
+State_df$Estados_low<-tolower(State_df$Estados)
+draw_us<-merge(us_states,State_df,by.x='region',by.y='Estados_low')
+
+p <- ggplot(data = draw_us,
+            aes(x = long, y = lat,
+                group = group, fill =Win ))
+
+p + geom_polygon(color = "gray90", size = 0.1) +coord_map(projection = "albers", lat0 = 39, lat1 = 45) +scale_fill_manual(values = c("blue","red"))
+```
+
+
+#### Resultados 2020. Relación con COVID-19
+
+Procedemos a realizar un análisis de los resultados de las elecciones de 2020. En primer lugar, al igual que en el caso anterior, añadimos una columna que indique el partido que ha obtenido la victoria. Representamos los datos en el mapa para poder comparar visualemente con el mapa anterior aquellos estados que hayan cambiado su tendencia de voto. Podemos observar como los estados del Midwest han cambiado su tendencia con respecto a las elecciones de 2020, así como Arizona y Georgia.
+
+```{r}
+data_2020$lower<-tolower(data_2020$State.Name)
+Win2020<-(data_2020$Democratic.Candidate>data_2020$Republican.Candidate) %>%
+  str_replace_all(c('TRUE'='Democrat','FALSE'='Republican'))
+data_2020<-cbind(data_2020,Win2020)
+
+draw_us2020<-merge(us_states,data_2020,by.x='region',by.y='lower')
+
+p2020 <- ggplot(data = draw_us2020,
+            aes(x = long, y = lat,
+                group = group, fill =Win2020 ))
+
+p2020 + geom_polygon(color = "gray90", size = 0.1) +coord_map(projection = "albers", lat0 = 39, lat1 = 45) +scale_fill_manual(values = c("blue","red"))
+```
+
+Al igual que realizamos para los resultados de 2012 y 2016, estudiamos la correlación entre los candidatos de 2020 y los candidatos de 2016 mediante modelos de regresión lineal. Vemos que en ambos casos se encuentran muy correlacionados, con coeficientes superiores al 99%.
+
+```{r message=FALSE}
+
+Elect<-merge(State_df,data_2020,by.x ='Estados',by.y='State.Name')
+ggplot(Elect, aes(x=Democratic.Candidate, y=Clinton), main=expression(Democratic.candidate,Clinton)) + geom_point()+geom_smooth(method=lm,col = "coral1")
+cor(Elect$Democratic.Candidate,Elect$Clinton,use="complete.obs") 
+
+ggplot(Elect, aes(x=Republican.Candidate, y=Trump), main=expression(Republican.candidate,Trump)) + geom_point()+geom_smooth(method=lm,col = "coral1")
+cor(Elect$Republican.Candidate,Elect$Trump,use="complete.obs") 
+```
+
+Representamos los casos de COVID-19 en un mapa de calor para observar cuáles son los estados más afectados.
+
+```{r}
+covid_data$lower<-tolower(covid_data$State.Territory)
+location_covid<-inner_join(us_states,covid_data,by=c('region'='lower'))
+c <- ggplot(data = location_covid,
+            aes(x = long, y = lat,
+                group = group, fill =Total.Cases ))
+
+c + geom_polygon(color = "gray90", size = 0.1) +coord_map(projection = "albers", lat0 = 39, lat1 = 45)
+```
+
+Podemos observar en el mapa que aquellos estados de mayor tamaño parecen tener un mayor número de casos. Para ver si esto es correcto, calculamos la correlación entre la población y el número de casos.
+
+```{r message=FALSE, warning=FALSE}
+aux<-inner_join(electoral,covid_data,c('Var1'='State.Territory'))
+cor(aux$poblacion,aux$Total.Cases)
+```
+
+
+Estudiaremos la relación entre los casos de Covid-19 detectados y los resultados de las elecciones 2020. Para ello analizaremos más en profundidad el modelo de regresión lineal generado con estas dos variables, no solo gráficamente como hemos hecho en casos anteriores.
+
+```{r}
+Regr <- inner_join(data_2020,covid_data,by=c('State.Name'='State.Territory'))%>%
+        select(State.Name,Democratic.Candidate,Republican.Candidate,Total.Cases)
+```
+
+Creamos un modelo para cada uno de los candidatos. Comenzamos con el modelo de Joe Biden, el candidato demócrata. Podemos observar que los residuos en este caso muestran una falta de homogeneidad. No obstante, la normalidad de estos, analizada en la curva Q-Q, es superior a la que veremos a continuación.
+
+```{r}
+# Construyendo el modelo
+modelo_dem = lm(Democratic.Candidate ~ Total.Cases, data = Regr)
+# Coeficientes del modelo
+b0 = modelo_dem$coefficients[1]
+b1 = modelo_dem$coefficients[2]
+plot(modelo_dem, which = 1, pch=19)
+plot(modelo_dem, which = 2, pch=19)
+
+```
+
+El coeficiente de correlación en este caso es de 88.9%.
+
+```{r}
+# Coeficiente de correlación
+cor(Regr$Democratic.Candidate,Regr$Total.Cases,use="complete.obs") 
+```
+
+Calculamos el intervalo de confianza de los coeficientes del modelo y el resumen de las características de este.
+
+```{r}
+confint(modelo_dem)
+
+summary(modelo_dem)
+```
+
+Creamos también el modelo para el candidato republicano, Donald Trump. Calculamos los coeficientes del modelo y el gráfico de residuos. Observamos que los datos presentan bastante homogeneidad puesto que la línea es prácticamente horizontal. Si representamos los residuos, vemos que no muestran normalidad en las colas, solo en el intervalo central.
+
+```{r}
+
+# Construyendo el modelo
+modelo_rep = lm(Republican.Candidate ~ Total.Cases, data = Regr)
+# Coeficientes del modelo
+b0 = modelo_rep$coefficients[1]
+b1 = modelo_rep$coefficients[2]
+plot(modelo_rep, which = 1, pch=19)
+plot(modelo_rep, which = 2, pch=19)
+```
+
+El coeficiente de correlación en este caso es superior al anterior, con un valor de 95.1%.
+
+```{r}
+# Coeficiente de correlación
+cor(Regr$Republican.Candidate,Regr$Total.Cases,use="complete.obs") 
+```
+
+Obtenemos el intervalo de confianza para los coeficientes del modelo.
+
+```{r}
+# Intervalo de confianza de los coeficientes del modelo
+confint(modelo_rep)
+
+# Resumen de parámetros
+summary(modelo_rep)
+```
+
+Encontramos una paradoja en estos modelos, tal y como se representa también en estos gráficos. En los estados en los que el virus ha sido más perjudicial y hay más casos, hay más votantes de Trump.
+
+```{r message=FALSE}
+ggplot(Regr, aes(x=Democratic.Candidate, y=Total.Cases), main=expression(Democratic.candidate,Total.Cases)) + geom_point()+geom_smooth(method=lm,col = "coral1")
+ggplot(Regr, aes(x=Republican.Candidate, y=Total.Cases), main=expression(Republican.candidate,Total.Cases)) + geom_point()+geom_smooth(method=lm,col = "coral1")
+```
+
+No obstante, hemos visto anteriormente que el número de casos está muy relacionado con el número de habitantes de cada estado. Calculamos la proporción de casos por cada 100.000 habitantes y obtenemos la correlación de los resultados de cada candidato. Podemos ver que en ambos casos hay correlación negativa, con los resultados del candidato republicano mostrando muy poca asociación con esta variable. En el caso del candidato demócrata sí vemos una correlación negativa del 20%.
+
+```{r}
+CaseProp<-aux$Total.Cases/aux$poblacion*100000
+aux<-cbind(aux,CaseProp)
+cor(aux$CaseProp,aux$Republican.Candidate,method = "pearson", use = "complete.obs")
+cor(aux$CaseProp,aux$Democratic.Candidate,method = "pearson", use = "complete.obs")
+```
+
+```{r message=FALSE}
+ggplot(aux, aes(x=Democratic.Candidate, y=CaseProp), main=expression(Democratic.candidate,CaseProp)) + geom_point()+geom_smooth(method=lm,col = "coral1")
+ggplot(aux, aes(x=Republican.Candidate, y=CaseProp), main=expression(Republican.candidate,CaseProp)) + geom_point()+geom_smooth(method=lm,col = "coral1")
+```
+
+
+
